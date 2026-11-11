@@ -1,8 +1,26 @@
+<a href="https://liberapay.com/NeptuneHub/donate"><img alt="Donate using Liberapay" src="https://liberapay.com/assets/widgets/donate.svg"></a>
+
 # AudioMuse-AI-Local-Bridge
+
+<p align="center">
+  <img src="https://github.com/NeptuneHub/audiomuse-ai-plugin/blob/master/audiomuseai.png?raw=true" alt="AudioMuse-AI Logo" width="480">
+</p>
 
 ## What it is
 
 AudioMuse-AI Local Bridge is a small program that lets AudioMuse-AI use the music files on your computer. It reads the tags of the songs in your music folder and shares them with AudioMuse-AI using the same API as a Navidrome server, so you do not need a real music server. Artists and albums come from the song tags, the same way Navidrome does it. Playlists made by AudioMuse-AI are saved as `.m3u8` files in a `Playlists` folder inside your music folder, so other music players can open them too.
+
+**The full list of AudioMuse-AI related repository are:** 
+  > * [AudioMuse-AI](https://github.com/NeptuneHub/AudioMuse-AI): the core application, it run Flask and Worker containers to actually run all the feature;
+  > * [AudioMuse-AI Helm Chart](https://github.com/NeptuneHub/AudioMuse-AI-helm): helm chart for easy installation on Kubernetes;
+  > * [AudioMuse-AI Plugin for Navidrome](https://github.com/NeptuneHub/AudioMuse-AI-NV-plugin): Navidrome Plugin;
+  > * [AudioMuse-AI Plugin for Jellyfin](https://github.com/NeptuneHub/audiomuse-ai-plugin): Jellyfin Plugin;
+  > * [AudioMuse-AI MusicServer](https://github.com/NeptuneHub/AudioMuse-AI-MusicServer): Open Subosnic like Music Sever with integrated sonic functionality;
+  > * [AudioMuse-AI-Local-Bridge](https://github.com/NeptuneHub/AudioMuse-AI-Local-Bridge): Let AudioMuse-AI analyze the music directly on your computer;
+  > * [AudioMuse-AI Music Assistant Provider](https://github.com/music-assistant/server/releases/tag/2.11.0b6): Use AudioMuse-AI as sonic analysis provider for Music Assistant v2.11+
+  > * [AudioMuse-AI-Jellyfin-SDK](https://github.com/NeptuneHub/AudioMuse-AI-MusicServer): Typed client for the AudioMuse AI endpoints exposed by its Jellyfin plugin, built on @jellyfin/sdk;
+  > * [lyrion-audiomuseai-plugin](https://github.com/JameZUK/lyrion-audiomuseai-plugin): Unofficial Lyrion Plugin by [JameZUK](https://github.com/JameZUK);
+  > * [ha-audiomuse](https://github.com/colfin22/ha-audiomuse): Unofficial Home Assistant Plugin by [Colfin22](https://github.com/colfin22).
 
 ## Install and use
 
