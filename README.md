@@ -8,7 +8,7 @@
 
 ## What it is
 
-AudioMuse-AI Local Bridge is a small program that lets AudioMuse-AI use the music files on your computer. It reads the tags of the songs in your music folder and shares them with AudioMuse-AI using the same API as a Navidrome server, so you do not need a real music server. Artists and albums come from the song tags, the same way Navidrome does it. Playlists made by AudioMuse-AI are saved as `.m3u8` files in a `Playlists` folder inside your music folder, so other music players can open them too.
+AudioMuse-AI Local Bridge is a small program that lets AudioMuse-AI use the music files on your computer. It reads the tags of the songs in your music folder and shares them with AudioMuse-AI using the same API as an Open Subsonic server, so you do not need a real music server. Artists and albums come from the song tags. Playlists made by AudioMuse-AI are saved as `.m3u8` files in a `Playlists` folder inside your music folder, so other music players can open them too.
 
 **The full list of AudioMuse-AI related repository are:** 
   > * [AudioMuse-AI](https://github.com/NeptuneHub/AudioMuse-AI): the core application, it run Flask and Worker containers to actually run all the feature;
