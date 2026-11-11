@@ -58,7 +58,8 @@ jobs:
           sed "s/VERSION/${TAG#v}/g" assets/Info.plist > "$app/Contents/Info.plist"
           cp assets/AppIcon.icns "$app/Contents/Resources/"
           codesign --force --sign - "$app"
-          cp README.md "$pkg/"
+          # How to approve the unsigned app, like the AudioMuse-AI macOS app.
+          cp README.md assets/README-macOS.txt "$pkg/"
           ditto -c -k --keepParent "$pkg" "$pkg.zip"
       - uses: actions/upload-artifact@v4
         with:

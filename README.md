@@ -21,7 +21,7 @@ Click the logo to open its menu. From there you can open the page in the browser
 
 The data folder has `bridge.db` (your library and settings), `bridge.key` (the key that protects your password) and `bridge.log`. To start again from zero, quit the program and delete this folder.
 
-The first time, macOS can block the program because it is not signed. Open System Settings, then Privacy & Security, and click "Open Anyway". On Windows, click "More info" and then "Run anyway".
+The first time, macOS blocks the app because it is not signed. Run `xattr -dr com.apple.quarantine "/Applications/AudioMuse-AI Local Bridge.app"` in the Terminal, or open the app, close the warning, then click "Open Anyway" in System Settings, Privacy & Security. The file `README-macOS.txt` in the zip explains both ways. On Windows, click "More info" and then "Run anyway".
 
 ## For developers
 
