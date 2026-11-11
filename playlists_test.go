@@ -28,18 +28,21 @@ func TestPlaylistFile(t *testing.T) {
 
 func TestEntryRel(t *testing.T) {
 	root := t.TempDir()
+	dir := playlistDir(root)
 	cases := map[string]string{
-		"Artist/Album/a.flac":                          "Artist/Album/a.flac",
-		`Artist\Album\a.flac`:                          "Artist/Album/a.flac",
-		"./x.mp3":                                      "x.mp3",
+		"../Artist/Album/a.flac":                       "Artist/Album/a.flac",
+		`..\Artist\Album\a.flac`:                       "Artist/Album/a.flac",
+		"mix.mp3":                                      "Playlists/mix.mp3",
+		"./sub/x.mp3":                                  "Playlists/sub/x.mp3",
 		filepath.Join(root, "Artist", "b.mp3"):         "Artist/b.mp3",
 		"file://" + filepath.ToSlash(root) + "/c.mp3":  "c.mp3",
-		"../outside.mp3":                               "",
+		"../../outside.mp3":                            "",
+		"..":                                           "",
 		"http://radio.example/stream":                  "",
 		filepath.Join(filepath.Dir(root), "other.mp3"): "",
 	}
 	for in, want := range cases {
-		if got := entryRel(root, in); got != want {
+		if got := entryRel(root, dir, in); got != want {
 			t.Errorf("entryRel(%q) = %q, want %q", in, got, want)
 		}
 	}

@@ -4,8 +4,10 @@ import (
 	"cmp"
 	"context"
 	"crypto/md5"
-	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"math/big"
@@ -152,11 +154,9 @@ func newHash(data ...string) string {
 	return fmt.Sprintf("%022s", new(big.Int).SetBytes(h.Sum(nil)).Text(62))
 }
 
-func newRandomID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return fmt.Sprintf("%022s", new(big.Int).SetBytes(b).Text(62))
-}
+// songID is the id of the song at rel, its path relative to the music folder with "/". The same
+// file always gets the same id: after a rescan, with a new database, or on another computer.
+func songID(rel string) string { return newHash(rel) }
 
 func artistID(name string) string { return newHash(strings.ToLower(strings.TrimSpace(name))) }
 
@@ -271,11 +271,12 @@ type ScanStatus struct {
 }
 
 type Scanner struct {
-	store  *Store
-	mu     sync.Mutex
-	status ScanStatus
-	cancel context.CancelFunc
-	done   chan struct{}
+	store     *Store
+	mu        sync.Mutex
+	status    ScanStatus
+	cancel    context.CancelFunc
+	done      chan struct{}
+	lastFiles string // fingerprint of the files of the last finished scan
 }
 
 func newScanner(st *Store) *Scanner {
@@ -297,8 +298,22 @@ func (sc *Scanner) update(f func(*ScanStatus)) {
 }
 
 // Start begins a scan of root. A scan already running is cancelled first.
-func (sc *Scanner) Start(root string) {
+func (sc *Scanner) Start(root string) { sc.start(root, false) }
+
+// Check looks for added, changed or removed music files and scans only if it finds some.
+// It does nothing while another scan runs, and the page shows nothing while it looks.
+func (sc *Scanner) Check(root string) { sc.start(root, true) }
+
+func (sc *Scanner) start(root string, check bool) {
 	sc.mu.Lock()
+	if check && sc.done != nil {
+		select {
+		case <-sc.done:
+		default:
+			sc.mu.Unlock()
+			return // a scan is running
+		}
+	}
 	if sc.cancel != nil {
 		sc.cancel()
 	}
@@ -312,8 +327,24 @@ func (sc *Scanner) Start(root string) {
 		if prev != nil {
 			<-prev
 		}
-		sc.run(ctx, root)
+		sc.run(ctx, root, check)
 	}()
+}
+
+// Stop cancels a running scan and waits for it to end. The database keeps the last finished scan.
+func (sc *Scanner) Stop() {
+	sc.mu.Lock()
+	if sc.cancel != nil {
+		sc.cancel()
+	}
+	sc.mu.Unlock()
+	sc.Wait()
+	sc.update(func(s *ScanStatus) {
+		if s.State == "scanning" {
+			s.State, s.Phase = "idle", ""
+			s.Artists, s.Albums, s.Songs = sc.store.counts()
+		}
+	})
 }
 
 // Wait blocks until the current scan is finished.
@@ -333,20 +364,46 @@ type fileEntry struct {
 
 func (sc *Scanner) fail(err error) {
 	log.Printf("scan failed: %v", err)
-	sc.update(func(s *ScanStatus) { s.State, s.Error, s.FinishedAt = "error", err.Error(), time.Now().Unix() })
+	sc.update(func(s *ScanStatus) {
+		s.State, s.Error, s.FinishedAt = "error", err.Error(), time.Now().Unix()
+		sc.lastFiles = ""
+	})
 }
 
-func (sc *Scanner) run(ctx context.Context, root string) {
+// filesPrint is a fingerprint of the file list: it changes when a file is added, removed or edited.
+func filesPrint(root string, files []fileEntry) string {
+	h := sha256.New()
+	_, _ = io.WriteString(h, root)
+	for _, f := range files {
+		fmt.Fprintf(h, "\n%s\x00%d\x00%d", f.rel, f.size, f.mtime)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// run scans root. With check, it first lists the files without showing it on the page, and stops
+// there when nothing changed since the last scan.
+func (sc *Scanner) run(ctx context.Context, root string, check bool) {
 	start := time.Now()
-	log.Printf("scan started: %s", root)
-	sc.update(func(s *ScanStatus) {
-		*s = ScanStatus{State: "scanning", Phase: "finding", StartedAt: start.Unix(), Artists: s.Artists, Albums: s.Albums, Songs: s.Songs}
-	})
+	if check && sc.Status().State == "error" {
+		if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
+			return // still not reachable, and the page already shows the error
+		}
+		check = false // the folder is back: scan it, so the page leaves the error
+	}
+	scanning := func() {
+		sc.update(func(s *ScanStatus) {
+			*s = ScanStatus{State: "scanning", Phase: "finding", StartedAt: start.Unix(), Artists: s.Artists, Albums: s.Albums, Songs: s.Songs}
+		})
+	}
+	if !check {
+		log.Printf("scan started: %s", root)
+		scanning()
+	}
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 		sc.fail(fmt.Errorf("the music folder %q cannot be opened", root))
 		return
 	}
-	files, err := sc.walk(ctx, root)
+	files, err := sc.walk(ctx, root, !check)
 	if ctx.Err() != nil {
 		return
 	}
@@ -354,12 +411,23 @@ func (sc *Scanner) run(ctx context.Context, root string) {
 		sc.fail(fmt.Errorf("cannot read the music folder: %w", err))
 		return
 	}
+	fp := filesPrint(root, files)
+	if check {
+		sc.mu.Lock()
+		same := fp == sc.lastFiles
+		sc.mu.Unlock()
+		if same {
+			return
+		}
+		log.Printf("scan started: new, changed or removed files in %s", root)
+		scanning()
+	}
 	existing, err := sc.store.allSongs()
 	if err != nil {
 		sc.fail(err)
 		return
 	}
-	sc.update(func(s *ScanStatus) { s.Phase, s.Artists, s.Albums, s.Songs = "reading", 0, 0, 0 })
+	sc.update(func(s *ScanStatus) { s.Found, s.Phase, s.Artists, s.Albums, s.Songs = len(files), "reading", 0, 0, 0 })
 
 	jobs := make(chan fileEntry)
 	results := make(chan *Song, 64)
@@ -417,6 +485,7 @@ func (sc *Scanner) run(ctx context.Context, root string) {
 	sc.update(func(s *ScanStatus) {
 		s.State, s.Phase, s.FinishedAt = "done", "", time.Now().Unix()
 		s.Artists, s.Albums, s.Songs = ar, al, so
+		sc.lastFiles = fp
 	})
 }
 
@@ -452,7 +521,8 @@ func ignoredByNdignore(dir string) bool {
 }
 
 // walk lists the audio files under root. Symlinks are followed, each real folder is visited once.
-func (sc *Scanner) walk(ctx context.Context, root string) ([]fileEntry, error) {
+// With progress, the page shows how many files were found so far.
+func (sc *Scanner) walk(ctx context.Context, root string, progress bool) ([]fileEntry, error) {
 	var files []fileEntry
 	visited := map[string]bool{}
 	var walkDir func(abs, rel string) error
@@ -505,7 +575,9 @@ func (sc *Scanner) walk(ctx context.Context, root string) ([]fileEntry, error) {
 			}
 			files = append(files, fileEntry{abs: childAbs, rel: childRel, size: info.Size(),
 				mtime: info.ModTime().UnixNano(), created: fileCreated(info)})
-			sc.update(func(s *ScanStatus) { s.Found = len(files) })
+			if progress {
+				sc.update(func(s *ScanStatus) { s.Found = len(files) })
+			}
 		}
 		return nil
 	}
@@ -517,6 +589,7 @@ func (sc *Scanner) walk(ctx context.Context, root string) ([]fileEntry, error) {
 func readSong(f fileEntry, prev *Song) *Song {
 	if prev != nil && prev.Size == f.size && prev.MTime == f.mtime {
 		cp := *prev
+		cp.ID = songID(f.rel) // also replaces the random ids of older versions
 		return &cp
 	}
 	raw, err := taglib.ReadTags(f.abs)
@@ -535,10 +608,7 @@ func readSong(f fileEntry, prev *Song) *Song {
 		t[lk] = append(t[lk], v...)
 	}
 	s := mapSong(t, f.rel)
-	s.ID = newRandomID()
-	if prev != nil {
-		s.ID = prev.ID
-	}
+	s.ID = songID(f.rel)
 	s.Size, s.MTime, s.Created = f.size, f.mtime, f.created
 	s.Duration = float64(props.Length.Milliseconds()) / 1000
 	s.BitRate, s.SampleRate, s.Channels = int(props.BitRate), int(props.SampleRate), int(props.Channels)

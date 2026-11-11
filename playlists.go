@@ -1,17 +1,24 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"unicode/utf8"
 )
 
-// Playlists are "<name>.m3u8" files directly in the music folder. The files are the only storage.
+// Playlists are "<name>.m3u8" files in the Playlists folder of the music folder, created when the
+// first playlist is saved. The files are the only storage. Song paths are relative to that folder
+// ("../Artist/Album/song.flac"), as the M3U format expects, so other players can open them too.
+
+const playlistFolder = "Playlists"
+
+func playlistDir(root string) string { return filepath.Join(root, playlistFolder) }
 
 type plEntry struct {
 	pre  []string // comment lines before the path, e.g. #EXTINF
@@ -20,7 +27,7 @@ type plEntry struct {
 }
 
 type playlist struct {
-	file             string // file name inside the music folder
+	file             string // file name inside the Playlists folder
 	name             string
 	entries          []*plEntry
 	tail             []string // comment lines after the last entry
@@ -43,7 +50,7 @@ func playlistID(file string) string { return newHash("playlist", strings.ToLower
 // oneLine keeps names and titles on one line, so they cannot add lines to the file.
 func oneLine(s string) string { return strings.NewReplacer("\r", " ", "\n", " ").Replace(s) }
 
-// playlistFile turns a playlist name into a safe file name in the music folder root.
+// playlistFile turns a playlist name into a safe file name.
 func playlistFile(name string) string {
 	var b strings.Builder
 	for _, r := range strings.TrimSpace(name) {
@@ -72,8 +79,9 @@ func playlistFile(name string) string {
 	return s + ".m3u8"
 }
 
-// entryRel converts a path line to a path relative to the music folder, or "" if it is outside.
-func entryRel(root, line string) string {
+// entryRel converts a path line of a playlist in folder dir to a path relative to the music folder
+// root, or "" if it is outside. Relative lines are relative to dir.
+func entryRel(root, dir, line string) string {
 	p := line
 	if strings.HasPrefix(strings.ToLower(p), "file://") {
 		u, err := url.Parse(p)
@@ -88,23 +96,22 @@ func entryRel(root, line string) string {
 	} else if strings.Contains(p, "://") {
 		return ""
 	}
-	if filepath.IsAbs(p) {
-		rel, err := filepath.Rel(root, p)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return ""
-		}
-		return filepath.ToSlash(rel)
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(dir, filepath.FromSlash(strings.ReplaceAll(p, `\`, "/")))
 	}
-	c := path.Clean(strings.ReplaceAll(p, `\`, "/"))
-	if c == "." || c == ".." || strings.HasPrefix(c, "../") || strings.HasPrefix(c, "/") {
+	rel, err := filepath.Rel(root, p)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return ""
 	}
-	return c
+	return filepath.ToSlash(rel)
 }
 
 func playlistFiles(root string) ([]string, error) {
-	entries, err := os.ReadDir(root)
-	if err != nil {
+	dir := playlistDir(root)
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil // no playlist saved yet
+	} else if err != nil {
 		return nil, err
 	}
 	var out []string
@@ -113,7 +120,7 @@ func playlistFiles(root string) ([]string, error) {
 		if isDotEntry(n) || !strings.EqualFold(filepath.Ext(n), ".m3u8") {
 			continue
 		}
-		if info, err := os.Stat(filepath.Join(root, n)); err == nil && info.Mode().IsRegular() {
+		if info, err := os.Stat(filepath.Join(dir, n)); err == nil && info.Mode().IsRegular() {
 			out = append(out, n)
 		}
 	}
@@ -121,7 +128,8 @@ func playlistFiles(root string) ([]string, error) {
 }
 
 func (a *App) loadPlaylist(root, file string) (*playlist, error) {
-	full := filepath.Join(root, file)
+	dir := playlistDir(root)
+	full := filepath.Join(dir, file)
 	data, err := os.ReadFile(full)
 	if err != nil {
 		return nil, err
@@ -143,7 +151,7 @@ func (a *App) loadPlaylist(root, file string) (*playlist, error) {
 			pending = append(pending, l)
 		default:
 			e := &plEntry{pre: pending, path: l}
-			if rel := entryRel(root, l); rel != "" {
+			if rel := entryRel(root, dir, l); rel != "" {
 				e.song, _ = a.store.songByPath(rel)
 			}
 			p.entries = append(p.entries, e)
@@ -172,6 +180,7 @@ func (a *App) findPlaylist(root, id string) (*playlist, error) {
 }
 
 // writePlaylist writes to a temporary file and renames it, so a crash never leaves half a file.
+// It creates the Playlists folder when it is missing.
 func writePlaylist(root string, p *playlist) error {
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n#PLAYLIST:" + oneLine(p.name) + "\n")
@@ -184,7 +193,11 @@ func writePlaylist(root string, p *playlist) error {
 	for _, l := range p.tail {
 		b.WriteString(l + "\n")
 	}
-	tmp, err := os.CreateTemp(root, ".playlist-*.tmp")
+	dir := playlistDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".playlist-*.tmp")
 	if err != nil {
 		return err
 	}
@@ -201,17 +214,13 @@ func writePlaylist(root string, p *playlist) error {
 		return err
 	}
 	_ = os.Chmod(tmp.Name(), 0o644)
-	return os.Rename(tmp.Name(), filepath.Join(root, p.file))
+	return os.Rename(tmp.Name(), filepath.Join(dir, p.file))
 }
 
 func songEntry(s *Song) *plEntry {
-	line := s.Path
-	if strings.HasPrefix(line, "#") {
-		line = "./" + line
-	}
 	return &plEntry{
 		pre:  []string{fmt.Sprintf("#EXTINF:%d,%s - %s", int(s.Duration), oneLine(s.Artist), oneLine(s.Title))},
-		path: line, song: s,
+		path: "../" + s.Path, song: s,
 	}
 }
 
@@ -227,7 +236,7 @@ func (a *App) songEntries(ids []string) []*plEntry {
 }
 
 func fileErr(err error) *apiError {
-	return &apiError{0, "Cannot write the playlist file in the music folder: " + err.Error()}
+	return &apiError{0, "Cannot write the playlist file in the Playlists folder: " + err.Error()}
 }
 
 // createPlaylist makes a new playlist file (replacing a file with the same name), or with
@@ -284,18 +293,19 @@ func (a *App) updatePlaylist(root, id string, name *string, add []string, remove
 	}
 	p.entries = append(kept, a.songEntries(add)...)
 
+	dir := playlistDir(root)
 	oldFile := p.file
 	if name != nil && strings.TrimSpace(*name) != "" && *name != p.name {
 		newFile := playlistFile(*name)
 		switch {
 		case newFile == oldFile:
 		case strings.EqualFold(newFile, oldFile): // only the letter case changes
-			if err := os.Rename(filepath.Join(root, oldFile), filepath.Join(root, newFile)); err != nil {
+			if err := os.Rename(filepath.Join(dir, oldFile), filepath.Join(dir, newFile)); err != nil {
 				return fileErr(err)
 			}
 			oldFile = newFile
 		default:
-			if _, err := os.Stat(filepath.Join(root, newFile)); err == nil {
+			if _, err := os.Stat(filepath.Join(dir, newFile)); err == nil {
 				return &apiError{0, fmt.Sprintf("A playlist file named %q already exists", newFile)}
 			}
 		}
@@ -305,7 +315,7 @@ func (a *App) updatePlaylist(root, id string, name *string, add []string, remove
 		return fileErr(err)
 	}
 	if oldFile != p.file {
-		if err := os.Remove(filepath.Join(root, oldFile)); err != nil {
+		if err := os.Remove(filepath.Join(dir, oldFile)); err != nil {
 			return fileErr(err)
 		}
 	}
@@ -321,7 +331,7 @@ func (a *App) deletePlaylist(root, id string) *apiError {
 	} else if p == nil {
 		return errNotFound("Playlist")
 	}
-	if err := os.Remove(filepath.Join(root, p.file)); err != nil {
+	if err := os.Remove(filepath.Join(playlistDir(root), p.file)); err != nil {
 		return fileErr(err)
 	}
 	return nil

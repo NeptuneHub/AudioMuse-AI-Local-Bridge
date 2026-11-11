@@ -274,7 +274,7 @@ func (st *Store) saveScan(present []*Song, albums []*Album, artists []*Artist) e
 	}
 	ins, err := tx.Prepare(`INSERT INTO songs(` + songCols + `, search, missing)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
-		ON CONFLICT(path) DO UPDATE SET size=excluded.size, mtime=excluded.mtime, created=excluded.created,
+		ON CONFLICT(path) DO UPDATE SET id=excluded.id, size=excluded.size, mtime=excluded.mtime, created=excluded.created,
 		title=excluded.title, album=excluded.album, album_id=excluded.album_id, artist=excluded.artist,
 		artist_id=excluded.artist_id, artists=excluded.artists, album_artist=excluded.album_artist,
 		album_artist_id=excluded.album_artist_id, album_artists=excluded.album_artists, track=excluded.track,

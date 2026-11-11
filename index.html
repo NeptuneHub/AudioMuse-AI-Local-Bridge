@@ -5,57 +5,70 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AudioMuse-AI Local Bridge</title>
 <style>
+/* Colors, cards and type follow AudioMuse-AI's own pages (static/style.css). */
 :root {
-  --bg: #f4f5f7; --card: #ffffff; --text: #1d2330; --muted: #5f6878; --line: #dde1e8;
-  --accent: #3157d5; --accent-text: #ffffff; --ok: #1f8a4c; --err: #c23b3b; --bar: #e6e9f0;
+  --bg: #F9FAFB; --card: #FFFFFF; --input: #FFFFFF; --text: #1F2937; --title: #111827; --muted: #4B5563;
+  --line: #E5E7EB; --line-dark: #D1D5DB; --accent: #2563EB; --accent-hover: #1D4ED8; --soft: #F3F4F6;
+  --ok: #16A34A; --err: #DC2626; --bar: #E5E7EB;
+  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #14171d; --card: #1d2129; --text: #e7eaf0; --muted: #9aa3b2; --line: #2e3440;
-    --accent: #6d8cff; --accent-text: #0d1020; --ok: #4cc27f; --err: #ff7a7a; --bar: #2a303b; }
+  :root { --bg: #111827; --card: #1F2937; --input: #374151; --text: #F3F4F6; --title: #F9FAFB; --muted: #9CA3AF;
+    --line: #374151; --line-dark: #4B5563; --accent: #3B82F6; --accent-hover: #2563EB; --soft: #1a2332;
+    --ok: #22C55E; --err: #EF4444; --bar: #374151;
+    --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3); }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-main { max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; }
-h1 { font-size: 22px; margin: 0 0 4px; }
-h2 { font-size: 16px; margin: 0 0 12px; }
-.sub { color: var(--muted); margin: 0 0 20px; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
-label { display: block; font-weight: 600; margin: 12px 0 4px; }
-input[type=text], input[type=password] { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 1rem; box-shadow: var(--shadow); padding: 1.5rem; margin-bottom: 1.5rem; }
+.title { text-align: center; }
+.title h1 { font-size: 1.875rem; font-weight: 700; color: var(--title); margin: 0 0 .5rem; }
+.title p { color: var(--muted); margin: 0; }
+h2 { font-size: 1.25rem; font-weight: 600; color: var(--title); margin: 0 0 1rem; padding-bottom: .75rem; border-bottom: 1px solid var(--line); }
+label { display: block; font-size: .875rem; font-weight: 500; color: var(--muted); margin: 14px 0 .5rem; }
+input[type=text], input[type=password] { width: 100%; padding: .7rem .75rem; border: 1px solid var(--line-dark); border-radius: .375rem; background: var(--input); color: var(--title); font: inherit; }
+input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgb(37 99 235 / 0.25); }
 .row { display: flex; gap: 8px; align-items: center; }
 .row input { flex: 1; min-width: 0; }
-button { font: inherit; padding: 9px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; }
-button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+button { font: inherit; font-weight: 500; padding: .6rem 1.1rem; border-radius: .375rem; border: 1px solid var(--line-dark); background: var(--card); color: var(--text); cursor: pointer; }
+button:hover { background: var(--soft); }
+button.primary { background: var(--accent); color: #FFFFFF; border-color: var(--accent); font-weight: 600; }
+button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 button:disabled { opacity: .6; cursor: default; }
-.actions { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.actions { margin-top: 18px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .msg { margin-top: 10px; min-height: 1.5em; }
 .msg.err { color: var(--err); } .msg.ok { color: var(--ok); }
-.hint { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+.hint { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 4px 0 14px; }
-.stat { background: var(--bg); border-radius: 10px; padding: 12px; text-align: center; }
-.stat b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; }
+.stat { background: var(--soft); border: 1px solid var(--line); border-radius: .5rem; padding: 12px; text-align: center; }
+.stat b { display: block; font-size: 26px; color: var(--title); font-variant-numeric: tabular-nums; }
 .stat span { color: var(--muted); font-size: 13px; }
 .bar { height: 8px; background: var(--bar); border-radius: 4px; overflow: hidden; margin: 8px 0; }
 .bar div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
 .conn { width: 100%; border-collapse: collapse; }
-.conn td { padding: 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.conn td { padding: 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
 .conn td:first-child { color: var(--muted); width: 38%; padding-right: 10px; }
-.conn code { overflow-wrap: anywhere; }
+.conn code { overflow-wrap: anywhere; background: var(--soft); padding: 1px 6px; border-radius: 4px; }
 .copy { padding: 2px 8px; font-size: 12px; margin-left: 6px; }
 .link { background: none; border: none; color: var(--accent); padding: 0; }
-dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--text); width: min(560px, calc(100vw - 32px)); padding: 16px; }
+.link:hover { background: none; text-decoration: underline; }
+dialog { border: 1px solid var(--line); border-radius: 1rem; background: var(--card); color: var(--text); width: min(560px, calc(100vw - 32px)); padding: 1.5rem; box-shadow: var(--shadow); }
 dialog::backdrop { background: rgba(0,0,0,.4); }
 #bPath { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; word-break: break-all; margin: 0 0 8px; }
-#bList { max-height: 50vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
-#bList button { display: block; width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--line); border-radius: 0; background: none; }
-#bList button:hover { background: var(--bg); }
+#bList { max-height: 50vh; overflow: auto; border: 1px solid var(--line); border-radius: .5rem; }
+#bList button { display: block; width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--line); border-radius: 0; background: none; font-weight: 400; }
+#bList button:hover { background: var(--soft); }
 .hidden { display: none !important; }
 </style>
 </head>
 <body>
 <main>
-  <h1>AudioMuse-AI Local Bridge</h1>
-  <p class="sub">Your local music folder, ready for AudioMuse-AI.</p>
+  <header class="card title">
+    <h1>AudioMuse-AI Local Bridge</h1>
+    <p>Your local music folder, ready for AudioMuse-AI.</p>
+  </header>
 
   <section id="vSetup" class="card hidden">
     <h2>First setup</h2>
@@ -63,7 +76,7 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
     <form id="fSetup">
       <label for="sDir">Music folder</label>
       <div class="row"><input id="sDir" type="text" autocomplete="off"><button type="button" data-browse="sDir">Browse</button></div>
-      <p class="hint">The folder with your music files. Playlists will be saved here as .m3u8 files.</p>
+      <p class="hint">The folder with your music files. Playlists will be saved as .m3u8 files in its Playlists folder.</p>
       <label for="sUser">Username</label>
       <input id="sUser" type="text" autocomplete="username">
       <label for="sPass">Password</label>
@@ -96,6 +109,7 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
       </div>
       <div class="bar" id="bar"><div></div></div>
       <div id="scanText"></div>
+      <p class="hint" id="scanHint"></p>
       <div class="actions"><button id="rescan" type="button">Scan again</button></div>
     </section>
 
@@ -103,7 +117,7 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
       <h2>Connect AudioMuse-AI</h2>
       <p class="hint" style="margin:0 0 8px">In AudioMuse-AI, add a music server of type <b>Navidrome</b> and use one of these addresses.</p>
       <table class="conn" id="conn"></table>
-      <p class="hint">Keep this program running while AudioMuse-AI works. Playlists made by AudioMuse-AI appear as .m3u8 files in your music folder.</p>
+      <p class="hint">Keep this program running while AudioMuse-AI works. Playlists made by AudioMuse-AI appear as .m3u8 files in the Playlists folder of your music folder.</p>
     </section>
 
     <section class="card">
@@ -162,6 +176,10 @@ async function load() {
     show('vMain');
     $('eDir').value = state.musicDir; $('eUser').value = state.username; $('ePass').value = '';
     renderConn();
+    const every = state.scanEvery || 0, mins = every / 60;
+    $('scanHint').textContent = every
+      ? 'New, changed and removed songs are found automatically every ' + (every % 60 ? every + ' seconds' : mins === 1 ? 'minute' : mins + ' minutes') + '. Click Scan again to look now.'
+      : 'After you add or change songs, click Scan again.';
     poll();
     timer = setInterval(poll, 1000);
   }

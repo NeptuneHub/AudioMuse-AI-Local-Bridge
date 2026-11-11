@@ -280,19 +280,27 @@ func TestPlaylists(t *testing.T) {
 		ids = append(ids, obj(s)["id"].(string))
 	}
 
+	// No Playlists folder yet: an empty list. Files in the music folder root are not playlists.
+	_ = os.WriteFile(filepath.Join(music, "Root.m3u8"), []byte("Artist/Album/02 - Two.wav\n"), 0o644)
+	if pls := obj(c.ok("getPlaylists")["playlists"]); len(pls) != 0 {
+		t.Fatalf("getPlaylists before the first playlist: %v", pls)
+	}
+
 	// Create, like AudioMuse-AI: name + songId list, then fill with updatePlaylist in batches.
+	// The Playlists folder is created by the first save.
 	r := c.ok("createPlaylist", "name", "a/b:c_automatic", "songId", ids[0], "songId", "unknown-id")
 	pl := obj(r["playlist"])
 	id := pl["id"].(string)
 	if pl["songCount"].(float64) != 1 || len(list(pl["entry"])) != 1 {
 		t.Fatalf("created playlist: %v", pl)
 	}
-	file := filepath.Join(music, "a_b_c_automatic.m3u8")
+	plDir := filepath.Join(music, "Playlists")
+	file := filepath.Join(plDir, "a_b_c_automatic.m3u8")
 	data, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatalf("playlist file not created: %v", err)
 	}
-	if !strings.HasPrefix(string(data), "#EXTM3U\n#PLAYLIST:a/b:c_automatic\n#EXTINF:1,") || !strings.Contains(string(data), "\n"+all[0].(map[string]any)["path"].(string)[len(music)+1:]+"\n") {
+	if !strings.HasPrefix(string(data), "#EXTM3U\n#PLAYLIST:a/b:c_automatic\n#EXTINF:1,") || !strings.Contains(string(data), "\n../"+all[0].(map[string]any)["path"].(string)[len(music)+1:]+"\n") {
 		t.Fatalf("file content:\n%s", data)
 	}
 	var add []string
@@ -334,7 +342,7 @@ func TestPlaylists(t *testing.T) {
 	}
 
 	// A playlist made by hand is listed, with its file name as name.
-	_ = os.WriteFile(filepath.Join(music, "Mine.m3u8"), []byte("Artist/Album/02 - Two.wav\r\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(plDir, "Mine.m3u8"), []byte("../Artist/Album/02 - Two.wav\r\n"), 0o644)
 	pls = list(obj(c.ok("getPlaylists")["playlists"])["playlist"])
 	if len(pls) != 2 || obj(pls[1])["name"] != "Mine" || obj(pls[1])["songCount"].(float64) != 1 {
 		t.Errorf("hand-made playlist: %v", pls)
@@ -350,7 +358,7 @@ func TestPlaylists(t *testing.T) {
 		t.Errorf("renamed: %v", pl)
 	}
 	c.ok("deletePlaylist", "id", newID)
-	if _, err := os.Stat(filepath.Join(music, "Renamed.m3u8")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(plDir, "Renamed.m3u8")); !os.IsNotExist(err) {
 		t.Error("file still exists after delete")
 	}
 	if code := errCode(c.call("getPlaylist", "id", newID)); code != 70 {

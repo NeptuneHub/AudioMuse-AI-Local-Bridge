@@ -161,6 +161,9 @@ func TestScanAndRescan(t *testing.T) {
 		t.Fatalf("untagged song: %+v", loose)
 	}
 	one, _ := a.store.songByPath("Artist/Album/01 - One.wav")
+	if one.ID != newHash("Artist/Album/01 - One.wav") {
+		t.Fatalf("song id must be the hash of the relative path, got %q", one.ID)
+	}
 
 	// A rescan keeps ids. A deleted file is hidden; when it comes back it gets its old id.
 	scan(t, a)
@@ -181,6 +184,15 @@ func TestScanAndRescan(t *testing.T) {
 	if back, _ := a.store.songByPath("Artist/Album/01 - One.wav"); back == nil || back.ID != one.ID {
 		t.Fatal("returning file must keep its old id")
 	}
+
+	// Databases of older versions have random ids: the next scan replaces them.
+	if _, err := a.store.db.Exec(`UPDATE songs SET id = 'old-random-id' WHERE path = ?`, "Artist/Album/01 - One.wav"); err != nil {
+		t.Fatal(err)
+	}
+	scan(t, a)
+	if s, _ := a.store.songByPath("Artist/Album/01 - One.wav"); s == nil || s.ID != one.ID {
+		t.Fatalf("old random id not replaced: %+v", s)
+	}
 }
 
 func TestScanMissingFolderChangesNothing(t *testing.T) {
@@ -194,5 +206,46 @@ func TestScanMissingFolderChangesNothing(t *testing.T) {
 	}
 	if _, _, n := a.store.counts(); n != 1 {
 		t.Fatalf("library changed after a failed scan: %d songs", n)
+	}
+}
+
+func TestCheckScansOnlyWhenFilesChange(t *testing.T) {
+	a, music := testApp(t)
+	writeWAV(t, filepath.Join(music, "a.wav"), tags("TITLE", "A"))
+	scan(t, a)
+
+	// Nothing changed: the check stops after listing the files and the status stays the same.
+	a.scanner.update(func(s *ScanStatus) { s.FinishedAt = 1 }) // a real scan would change it
+	a.scanner.Check(music)
+	a.scanner.Wait()
+	if s := a.scanner.Status(); s.State != "done" || s.FinishedAt != 1 || s.Songs != 1 {
+		t.Fatalf("check without changes: %+v", s)
+	}
+
+	// A new file: the check scans and finds it.
+	writeWAV(t, filepath.Join(music, "b.wav"), tags("TITLE", "B"))
+	a.scanner.Check(music)
+	a.scanner.Wait()
+	if s := a.scanner.Status(); s.State != "done" || s.Songs != 2 {
+		t.Fatalf("check after adding a file: %+v", s)
+	}
+
+	// A missing folder shows the error once, and the check scans again when it is back.
+	moved := music + "-moved"
+	if err := os.Rename(music, moved); err != nil {
+		t.Fatal(err)
+	}
+	a.scanner.Check(music)
+	a.scanner.Wait()
+	if s := a.scanner.Status(); s.State != "error" {
+		t.Fatalf("check with the folder missing: %+v", s)
+	}
+	if err := os.Rename(moved, music); err != nil {
+		t.Fatal(err)
+	}
+	a.scanner.Check(music)
+	a.scanner.Wait()
+	if s := a.scanner.Status(); s.State != "done" || s.Songs != 2 {
+		t.Fatalf("check after the folder is back: %+v", s)
 	}
 }

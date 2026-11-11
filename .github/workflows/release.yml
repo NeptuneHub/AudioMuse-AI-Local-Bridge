@@ -1,35 +1,113 @@
 name: Release
 
+# Run it from the Actions tab, without inputs. It takes the highest vN tag and adds one
+# (v1, v2, v3 ...), builds the apps for macOS, Windows and Linux and publishes a release.
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+
 jobs:
-  release:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: next
+        run: |
+          last=$(git tag --list 'v*' | sed -n 's/^v\([0-9][0-9]*\)$/\1/p' | sort -n | tail -n 1)
+          tag="v$(( ${last:-0} + 1 ))"
+          echo "Next version: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go test ./...
-      - name: Build zips
+      - run: go vet ./... && go test ./...
+
+  macos:
+    needs: [version, test]
+    runs-on: macos-latest
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build the app (Apple Silicon and Intel in one)
+        run: |
+          pkg="dist/AudioMuse-AI-Local-Bridge-$TAG-macos"
+          app="$pkg/AudioMuse-AI Local Bridge.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          for arch in arm64 amd64; do
+            CGO_ENABLED=1 GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$TAG" -o "dist/bin-$arch" .
+          done
+          lipo -create -output "$app/Contents/MacOS/AudioMuse-AI-Local-Bridge" dist/bin-arm64 dist/bin-amd64
+          sed "s/VERSION/${TAG#v}/g" assets/Info.plist > "$app/Contents/Info.plist"
+          cp assets/AppIcon.icns "$app/Contents/Resources/"
+          codesign --force --sign - "$app"
+          cp README.md "$pkg/"
+          ditto -c -k --keepParent "$pkg" "$pkg.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.zip
+
+  windows-linux:
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
         run: |
           name=AudioMuse-AI-Local-Bridge
-          mkdir dist
-          for target in darwin/arm64 darwin/amd64 windows/amd64 linux/amd64 linux/arm64; do
-            os=${target%/*}; arch=${target#*/}; ext=""
-            [ "$os" = windows ] && ext=.exe
-            dir=dist/$name-$os-$arch
+          # The logo as the icon of the Windows .exe file.
+          go run github.com/akavel/rsrc@v0.10.2 -ico assets/icon.ico -arch amd64 -o rsrc_windows_amd64.syso
+          for target in windows/amd64 linux/amd64 linux/arm64; do
+            os=${target%/*}; arch=${target#*/}; ext=""; gui=""
+            # A Windows app without a console window: the log goes to the file.
+            if [ "$os" = windows ]; then ext=.exe; gui="-H windowsgui"; fi
+            dir="dist/$name-$TAG-$os-$arch"
             mkdir -p "$dir"
             CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
-              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "$dir/$name$ext" .
+              -ldflags "-s -w $gui -X main.version=$TAG" -o "$dir/$name$ext" .
             cp README.md "$dir/"
-            (cd dist && zip -qr "$name-$os-$arch.zip" "$name-$os-$arch")
+            (cd dist && zip -qr "$name-$TAG-$os-$arch.zip" "$name-$TAG-$os-$arch")
           done
-      - uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@v4
         with:
-          files: dist/*.zip
+          name: windows-linux
+          path: dist/*.zip
+
+  release:
+    needs: [version, macos, windows-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" dist/*.zip --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "AudioMuse-AI Local Bridge $TAG" --generate-notes

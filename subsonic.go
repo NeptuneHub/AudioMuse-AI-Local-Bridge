@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -70,29 +72,79 @@ func (a *App) restRoutes() map[string]restHandler {
 	}
 }
 
-// handleRest serves /rest/<name> and /rest/<name>.view, GET or POST (query string or form body).
+// handleRest serves /rest/<name> and /rest/<name>.view, GET or POST (query string or form body),
+// and logs one line per call.
 func (a *App) handleRest(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/rest/"), ".view")
+	result := a.serveRest(w, r, name)
+	took := time.Since(start)
+	if took < time.Millisecond {
+		took = took.Round(time.Microsecond)
+	} else {
+		took = took.Round(100 * time.Microsecond)
+	}
+	log.Printf("API %s%s from %s: %s (%s)", name, logParams(r.Form), clientIP(r), result, took)
+}
+
+func (a *App) serveRest(w http.ResponseWriter, r *http.Request, name string) string {
 	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 	if err := r.ParseForm(); err != nil {
-		send(w, nil, &apiError{0, "Invalid request"})
-		return
+		return reply(w, nil, &apiError{0, "Invalid request"})
 	}
-	name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/rest/"), ".view")
 	h, ok := a.routes[name]
 	if !ok && name != "stream" {
 		http.NotFound(w, r)
-		return
+		return "unknown endpoint, HTTP 404"
 	}
 	if e := a.authenticate(r); e != nil {
-		send(w, nil, e)
-		return
+		return reply(w, nil, e)
 	}
 	if name == "stream" {
-		a.stream(w, r)
-		return
+		return a.stream(w, r)
 	}
 	payload, e := h(r)
+	return reply(w, payload, e)
+}
+
+// reply sends the response and returns the result for the log.
+func reply(w http.ResponseWriter, payload map[string]any, e *apiError) string {
 	send(w, payload, e)
+	if e != nil {
+		return fmt.Sprintf("error %d, %s", e.code, e.msg)
+	}
+	return "ok"
+}
+
+// logParams formats the request parameters for the log. Credentials and fixed client
+// parameters are left out. Repeated parameters, like song id lists, are only counted.
+func logParams(q url.Values) string {
+	var keys []string
+	for k := range q {
+		switch k {
+		case "u", "p", "t", "s", "apiKey", "v", "c", "f":
+		default:
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		v := q[k]
+		if len(v) > 1 {
+			fmt.Fprintf(&b, " %s=[%d values]", k, len(v))
+			continue
+		}
+		val := v[0]
+		if rs := []rune(val); len(rs) > 80 {
+			val = string(rs[:80]) + "..."
+		}
+		if val == "" || strings.ContainsAny(val, " \"\t\r\n") {
+			val = strconv.Quote(val)
+		}
+		fmt.Fprintf(&b, " %s=%s", k, val)
+	}
+	return b.String()
 }
 
 // ---- authentication ----
@@ -493,35 +545,30 @@ func (a *App) search3(r *http.Request) (map[string]any, *apiError) {
 }
 
 // stream sends the original file (no transcoding). http.ServeContent handles Range requests.
-func (a *App) stream(w http.ResponseWriter, r *http.Request) {
+func (a *App) stream(w http.ResponseWriter, r *http.Request) string {
 	id := r.Form.Get("id")
 	if id == "" {
-		send(w, nil, errParam("id"))
-		return
+		return reply(w, nil, errParam("id"))
 	}
 	s, err := a.store.song(id)
 	if err != nil {
-		send(w, nil, errInternal(err))
-		return
+		return reply(w, nil, errInternal(err))
 	}
 	abs, ok := "", false
 	if s != nil {
 		abs, ok = songPath(a.cfg().MusicDir, s)
 	}
 	if !ok {
-		send(w, nil, &apiError{70, "data not found"})
-		return
+		return reply(w, nil, &apiError{70, "data not found"})
 	}
 	f, err := os.Open(abs)
 	if err != nil {
-		send(w, nil, &apiError{70, "data not found"})
-		return
+		return reply(w, nil, &apiError{70, "data not found"})
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		send(w, nil, errInternal(err))
-		return
+		return reply(w, nil, errInternal(err))
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Content-Duration", strconv.FormatFloat(s.Duration, 'f', 2, 64))
@@ -529,6 +576,17 @@ func (a *App) stream(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", ct)
 	}
 	http.ServeContent(w, r, s.Title+"."+s.Suffix, info.ModTime(), f)
+	if rng := r.Header.Get("Range"); rng != "" {
+		return fmt.Sprintf("ok, %s, %s of %s", s.Path, rng, sizeText(info.Size()))
+	}
+	return fmt.Sprintf("ok, %s, %s", s.Path, sizeText(info.Size()))
+}
+
+func sizeText(n int64) string {
+	if n < 1<<20 {
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
 }
 
 func (a *App) musicRoot() (string, *apiError) {

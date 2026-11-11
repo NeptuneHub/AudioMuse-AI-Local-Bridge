@@ -24,16 +24,17 @@ var indexHTML []byte
 const sessionCookie = "bridge_session"
 
 type App struct {
-	store    *Store
-	scanner  *Scanner
-	limiter  *limiter
-	routes   map[string]restHandler
-	port     int
-	mu       sync.RWMutex
-	settings Settings
-	sessMu   sync.Mutex
-	sessions map[string]time.Time
-	plMu     sync.Mutex
+	store     *Store
+	scanner   *Scanner
+	limiter   *limiter
+	routes    map[string]restHandler
+	port      int
+	mu        sync.RWMutex
+	settings  Settings
+	sessMu    sync.Mutex
+	sessions  map[string]time.Time
+	plMu      sync.Mutex
+	scanEvery time.Duration // how often the music folder is checked for changes, 0 = never
 }
 
 func newApp(st *Store, port int) *App {
@@ -160,16 +161,39 @@ func defaultMusicDir() string {
 func (a *App) connectURLs() []map[string]string {
 	urls := []map[string]string{
 		{"label": "AudioMuse-AI on this computer", "url": fmt.Sprintf("http://127.0.0.1:%d", a.port)},
-		{"label": "AudioMuse-AI in Docker on this computer", "url": fmt.Sprintf("http://host.docker.internal:%d", a.port)},
 	}
-	addrs, _ := net.InterfaceAddrs()
-	for _, ad := range addrs {
-		if n, ok := ad.(*net.IPNet); ok && n.IP.To4() != nil && n.IP.IsPrivate() {
-			urls = append(urls, map[string]string{"label": "AudioMuse-AI on another computer in your network",
-				"url": fmt.Sprintf("http://%s:%d", n.IP.String(), a.port)})
-		}
+	if ip := lanIP(); ip != "" {
+		urls = append(urls, map[string]string{"label": "AudioMuse-AI on another computer in your network",
+			"url": fmt.Sprintf("http://%s:%d", ip, a.port)})
 	}
 	return urls
+}
+
+// lanIP returns the local network address of this computer, or "". A computer can have more
+// than one (Wi-Fi and cable, VPN, virtual machines), so it takes the one the system uses for
+// its main connection. Connecting a UDP socket sends nothing: it only asks the system which
+// address it would use (192.0.2.1 is a reserved documentation address).
+func lanIP() string {
+	if c, err := net.Dial("udp4", "192.0.2.1:9"); err == nil {
+		ip := c.LocalAddr().(*net.UDPAddr).IP
+		c.Close()
+		if ip.IsPrivate() {
+			return ip.String()
+		}
+	}
+	ifaces, _ := net.Interfaces()
+	for _, ifc := range ifaces {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, _ := ifc.Addrs()
+		for _, ad := range addrs {
+			if n, ok := ad.(*net.IPNet); ok && n.IP.To4() != nil && n.IP.IsPrivate() {
+				return n.IP.String()
+			}
+		}
+	}
+	return ""
 }
 
 func (a *App) apiState(w http.ResponseWriter, r *http.Request) {
@@ -178,6 +202,7 @@ func (a *App) apiState(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{"app": appName, "version": version, "setupDone": cfg.ready(), "loggedIn": logged, "local": isLocal(r)}
 	if logged {
 		out["musicDir"], out["username"], out["urls"] = cfg.MusicDir, cfg.Username, a.connectURLs()
+		out["scanEvery"] = int(a.scanEvery.Seconds())
 	} else if !cfg.ready() && isLocal(r) {
 		out["musicDir"] = defaultMusicDir()
 	}
