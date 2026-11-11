@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - name: Build zips
+        run: |
+          name=AudioMuse-AI-Local-Bridge
+          mkdir dist
+          for target in darwin/arm64 darwin/amd64 windows/amd64 linux/amd64 linux/arm64; do
+            os=${target%/*}; arch=${target#*/}; ext=""
+            [ "$os" = windows ] && ext=.exe
+            dir=dist/$name-$os-$arch
+            mkdir -p "$dir"
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "$dir/$name$ext" .
+            cp README.md "$dir/"
+            (cd dist && zip -qr "$name-$os-$arch.zip" "$name-$os-$arch")
+          done
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip

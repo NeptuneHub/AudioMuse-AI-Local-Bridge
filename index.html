@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AudioMuse-AI Local Bridge</title>
+<style>
+:root {
+  --bg: #f4f5f7; --card: #ffffff; --text: #1d2330; --muted: #5f6878; --line: #dde1e8;
+  --accent: #3157d5; --accent-text: #ffffff; --ok: #1f8a4c; --err: #c23b3b; --bar: #e6e9f0;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #14171d; --card: #1d2129; --text: #e7eaf0; --muted: #9aa3b2; --line: #2e3440;
+    --accent: #6d8cff; --accent-text: #0d1020; --ok: #4cc27f; --err: #ff7a7a; --bar: #2a303b; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 16px; margin: 0 0 12px; }
+.sub { color: var(--muted); margin: 0 0 20px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+label { display: block; font-weight: 600; margin: 12px 0 4px; }
+input[type=text], input[type=password] { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row input { flex: 1; min-width: 0; }
+button { font: inherit; padding: 9px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+button:disabled { opacity: .6; cursor: default; }
+.actions { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.msg { margin-top: 10px; min-height: 1.5em; }
+.msg.err { color: var(--err); } .msg.ok { color: var(--ok); }
+.hint { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 4px 0 14px; }
+.stat { background: var(--bg); border-radius: 10px; padding: 12px; text-align: center; }
+.stat b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 13px; }
+.bar { height: 8px; background: var(--bar); border-radius: 4px; overflow: hidden; margin: 8px 0; }
+.bar div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+.conn { width: 100%; border-collapse: collapse; }
+.conn td { padding: 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.conn td:first-child { color: var(--muted); width: 38%; padding-right: 10px; }
+.conn code { overflow-wrap: anywhere; }
+.copy { padding: 2px 8px; font-size: 12px; margin-left: 6px; }
+.link { background: none; border: none; color: var(--accent); padding: 0; }
+dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--text); width: min(560px, calc(100vw - 32px)); padding: 16px; }
+dialog::backdrop { background: rgba(0,0,0,.4); }
+#bPath { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; word-break: break-all; margin: 0 0 8px; }
+#bList { max-height: 50vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+#bList button { display: block; width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--line); border-radius: 0; background: none; }
+#bList button:hover { background: var(--bg); }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>AudioMuse-AI Local Bridge</h1>
+  <p class="sub">Your local music folder, ready for AudioMuse-AI.</p>
+
+  <section id="vSetup" class="card hidden">
+    <h2>First setup</h2>
+    <p id="remoteNote" class="msg err hidden"></p>
+    <form id="fSetup">
+      <label for="sDir">Music folder</label>
+      <div class="row"><input id="sDir" type="text" autocomplete="off"><button type="button" data-browse="sDir">Browse</button></div>
+      <p class="hint">The folder with your music files. Playlists will be saved here as .m3u8 files.</p>
+      <label for="sUser">Username</label>
+      <input id="sUser" type="text" autocomplete="username">
+      <label for="sPass">Password</label>
+      <input id="sPass" type="password" autocomplete="new-password">
+      <p class="hint">AudioMuse-AI will use this username and password to connect.</p>
+      <div class="actions"><button class="primary" type="submit">Save and scan</button></div>
+      <p class="msg" id="setupMsg"></p>
+    </form>
+  </section>
+
+  <section id="vLogin" class="card hidden">
+    <h2>Log in</h2>
+    <form id="fLogin">
+      <label for="lUser">Username</label>
+      <input id="lUser" type="text" autocomplete="username">
+      <label for="lPass">Password</label>
+      <input id="lPass" type="password" autocomplete="current-password">
+      <div class="actions"><button class="primary" type="submit">Log in</button></div>
+      <p class="msg" id="loginMsg"></p>
+    </form>
+  </section>
+
+  <div id="vMain" class="hidden">
+    <section class="card">
+      <h2>Music library</h2>
+      <div class="stats">
+        <div class="stat"><b id="nArtists">0</b><span>Artists</span></div>
+        <div class="stat"><b id="nAlbums">0</b><span>Albums</span></div>
+        <div class="stat"><b id="nSongs">0</b><span>Songs</span></div>
+      </div>
+      <div class="bar" id="bar"><div></div></div>
+      <div id="scanText"></div>
+      <div class="actions"><button id="rescan" type="button">Scan again</button></div>
+    </section>
+
+    <section class="card">
+      <h2>Connect AudioMuse-AI</h2>
+      <p class="hint" style="margin:0 0 8px">In AudioMuse-AI, add a music server of type <b>Navidrome</b> and use one of these addresses.</p>
+      <table class="conn" id="conn"></table>
+      <p class="hint">Keep this program running while AudioMuse-AI works. Playlists made by AudioMuse-AI appear as .m3u8 files in your music folder.</p>
+    </section>
+
+    <section class="card">
+      <h2>Settings</h2>
+      <form id="fSettings">
+        <label for="eDir">Music folder</label>
+        <div class="row"><input id="eDir" type="text" autocomplete="off"><button type="button" data-browse="eDir">Browse</button></div>
+        <label for="eUser">Username</label>
+        <input id="eUser" type="text" autocomplete="username">
+        <label for="ePass">New password</label>
+        <input id="ePass" type="password" autocomplete="new-password" placeholder="Leave empty to keep the current password">
+        <div class="actions"><button class="primary" type="submit">Save</button><button class="link" id="logout" type="button">Log out</button></div>
+        <p class="msg" id="settingsMsg"></p>
+      </form>
+    </section>
+  </div>
+</main>
+
+<dialog id="browser">
+  <h2>Choose a folder</h2>
+  <p id="bPath"></p>
+  <div class="actions" style="margin:0 0 8px" id="bTop"></div>
+  <div id="bList"></div>
+  <div class="actions"><button class="primary" id="bUse" type="button">Use this folder</button><button id="bCancel" type="button">Cancel</button></div>
+</dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = {}, timer = null, browseTarget = null, browsePath = '';
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || ('Error ' + r.status));
+  return data;
+}
+
+function msg(id, text, ok) { const el = $(id); el.textContent = text; el.className = 'msg ' + (ok ? 'ok' : 'err'); }
+
+function show(view) { for (const v of ['vSetup', 'vLogin', 'vMain']) $(v).classList.toggle('hidden', v !== view); }
+
+async function load() {
+  state = await api('/api/state');
+  clearInterval(timer);
+  if (!state.setupDone) {
+    show('vSetup');
+    const remote = !state.local;
+    $('remoteNote').classList.toggle('hidden', !remote);
+    $('remoteNote').textContent = 'For your safety, the first setup works only on the computer where the bridge runs. Open http://localhost:' + location.port + ' there.';
+    $('fSetup').querySelectorAll('input,button').forEach((el) => el.disabled = remote);
+    if (state.musicDir && !$('sDir').value) $('sDir').value = state.musicDir;
+  } else if (!state.loggedIn) {
+    show('vLogin');
+  } else {
+    show('vMain');
+    $('eDir').value = state.musicDir; $('eUser').value = state.username; $('ePass').value = '';
+    renderConn();
+    poll();
+    timer = setInterval(poll, 1000);
+  }
+}
+
+function copyButton(text) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'copy'; b.textContent = 'Copy';
+  b.onclick = async () => { try { await navigator.clipboard.writeText(text); b.textContent = 'Copied'; } catch { b.textContent = 'Select and copy'; } setTimeout(() => b.textContent = 'Copy', 1500); };
+  return b;
+}
+
+function addRow(table, label, value, copy, plain) {
+  const tr = table.insertRow(), a = tr.insertCell(), b = tr.insertCell();
+  a.textContent = label;
+  const c = document.createElement(plain ? 'span' : 'code'); c.textContent = value; b.appendChild(c);
+  if (copy) b.appendChild(copyButton(value));
+}
+
+function renderConn() {
+  const t = $('conn'); t.textContent = '';
+  addRow(t, 'Server type', 'Navidrome', false);
+  for (const u of state.urls || []) addRow(t, u.label, u.url, true);
+  addRow(t, 'Username', state.username, true);
+  addRow(t, 'Password', 'The password you chose', false, true);
+}
+
+const fmt = (n) => Number(n || 0).toLocaleString();
+
+async function poll() {
+  let s;
+  try { s = await api('/api/status'); } catch (e) { clearInterval(timer); load(); return; }
+  $('nArtists').textContent = fmt(s.artists); $('nAlbums').textContent = fmt(s.albums); $('nSongs').textContent = fmt(s.songs);
+  let text = '', pct = 0;
+  const scanning = s.state === 'scanning';
+  if (scanning && s.phase === 'finding') { text = 'Looking for music files: ' + fmt(s.found) + ' found'; pct = 5; }
+  else if (scanning && s.phase === 'reading') { text = 'Reading songs: ' + fmt(s.processed) + ' of ' + fmt(s.found); pct = s.found ? 5 + 90 * s.processed / s.found : 95; }
+  else if (scanning) { text = 'Saving the library'; pct = 97; }
+  else if (s.state === 'done') { text = 'Scan finished at ' + new Date(s.finishedAt * 1000).toLocaleString() + '.'; pct = 100; if (s.skipped) text += ' ' + fmt(s.skipped) + ' files could not be read and were skipped.'; }
+  else if (s.state === 'error') { text = 'Scan failed: ' + s.error; }
+  else { text = s.songs ? 'Ready.' : 'No scan yet.'; pct = s.songs ? 100 : 0; }
+  $('scanText').textContent = text;
+  $('scanText').className = s.state === 'error' ? 'msg err' : '';
+  $('bar').firstElementChild.style.width = pct + '%';
+  $('rescan').disabled = scanning;
+}
+
+$('fSetup').onsubmit = async (e) => {
+  e.preventDefault();
+  try { await api('/api/setup', { musicDir: $('sDir').value, username: $('sUser').value, password: $('sPass').value }); load(); }
+  catch (err) { msg('setupMsg', err.message); }
+};
+$('fLogin').onsubmit = async (e) => {
+  e.preventDefault();
+  try { await api('/api/login', { username: $('lUser').value, password: $('lPass').value }); $('lPass').value = ''; load(); }
+  catch (err) { msg('loginMsg', err.message); }
+};
+$('fSettings').onsubmit = async (e) => {
+  e.preventDefault();
+  try { await api('/api/settings', { musicDir: $('eDir').value, username: $('eUser').value, password: $('ePass').value }); msg('settingsMsg', 'Saved.', true); load(); }
+  catch (err) { msg('settingsMsg', err.message); }
+};
+$('rescan').onclick = async () => { try { await api('/api/rescan', {}); poll(); } catch (err) { $('scanText').textContent = err.message; } };
+$('logout').onclick = async () => { await api('/api/logout', {}); load(); };
+
+async function browse(path) {
+  try {
+    const d = await api('/api/browse?path=' + encodeURIComponent(path || ''));
+    browsePath = d.path; $('bPath').textContent = d.path;
+    const top = $('bTop'); top.textContent = '';
+    const up = document.createElement('button'); up.type = 'button'; up.textContent = 'Up one folder';
+    up.disabled = d.parent === d.path; up.onclick = () => browse(d.parent); top.appendChild(up);
+    for (const r of d.roots) { const b = document.createElement('button'); b.type = 'button'; b.textContent = r; b.onclick = () => browse(r); top.appendChild(b); }
+    const list = $('bList'); list.textContent = '';
+    if (!d.dirs.length) { const p = document.createElement('p'); p.className = 'hint'; p.style.padding = '8px 12px'; p.textContent = 'No folders here.'; list.appendChild(p); }
+    for (const name of d.dirs) {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = name;
+      b.onclick = () => browse(d.path.replace(/[\\/]+$/, '') + (d.path.includes('\\') ? '\\' : '/') + name);
+      list.appendChild(b);
+    }
+  } catch (err) { $('bPath').textContent = err.message; }
+}
+document.querySelectorAll('[data-browse]').forEach((b) => b.onclick = () => {
+  browseTarget = $(b.dataset.browse); $('browser').showModal(); browse(browseTarget.value);
+});
+$('bUse').onclick = () => { browseTarget.value = browsePath; $('browser').close(); };
+$('bCancel').onclick = () => $('browser').close();
+
+load().catch((e) => { document.querySelector('main').append(Object.assign(document.createElement('p'), { className: 'msg err', textContent: 'Cannot reach the bridge: ' + e.message })); });
+</script>
+</body>
+</html>
