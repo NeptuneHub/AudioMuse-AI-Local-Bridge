@@ -41,6 +41,13 @@ jobs:
     runs-on: macos-latest
     env:
       TAG: ${{ needs.version.outputs.tag }}
+      # The oldest macOS the app runs on, the same as LSMinimumSystemVersion in Info.plist.
+      # Without it the C compiler uses the macOS version of the GitHub machine (26 or newer)
+      # and older Macs say "You can't use this version of the application". The CGO flags
+      # also keep Go from reusing cached C objects built for another version.
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+      CGO_CFLAGS: -O2 -g -mmacosx-version-min=12.0
+      CGO_LDFLAGS: -mmacosx-version-min=12.0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -55,6 +62,12 @@ jobs:
             CGO_ENABLED=1 GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$TAG" -o "dist/bin-$arch" .
           done
           lipo -create -output "$app/Contents/MacOS/AudioMuse-AI-Local-Bridge" dist/bin-arm64 dist/bin-amd64
+          # Stop here if the program would not open on macOS 12.
+          for a in arm64 x86_64; do
+            minos=$(otool -arch $a -l "$app/Contents/MacOS/AudioMuse-AI-Local-Bridge" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')
+            echo "$a: needs macOS $minos or newer"
+            if [ "$minos" != "$MACOSX_DEPLOYMENT_TARGET" ]; then echo "Wrong minimum macOS version"; exit 1; fi
+          done
           sed "s/VERSION/${TAG#v}/g" assets/Info.plist > "$app/Contents/Info.plist"
           cp assets/AppIcon.icns "$app/Contents/Resources/"
           codesign --force --sign - "$app"
